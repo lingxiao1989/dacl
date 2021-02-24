@@ -271,6 +271,172 @@ class CbamResNet(nn.Module):
         # x = self.output(x)
         # return out
 
+class FPNCbamResNet(nn.Module):
+    def __init__(self,
+                 channels,
+                 init_block_channels,
+                 bottleneck,
+                 in_channels=3,
+                 in_size=(224, 224),
+                 num_classes=1000):
+        super(CbamResNet, self).__init__()
+        self.in_size = in_size
+        self.num_classes = num_classes
+
+        ##FPN layers
+        self.in_planes = 64
+
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
+        # Bottom-up layers
+        self.layer2 = self._make_layer(block,  64, num_blocks[0], stride=1)
+        self.layer3 = self._make_layer(block, 128, num_blocks[1], stride=2)
+        self.layer4 = self._make_layer(block, 256, num_blocks[2], stride=2)
+        self.layer5 = self._make_layer(block, 512, num_blocks[3], stride=2)
+        self.conv6 = nn.Conv2d(2048, 256, kernel_size=3, stride=2, padding=1)
+        self.conv7 = nn.Conv2d( 256, 256, kernel_size=3, stride=2, padding=1)
+
+        # Top layer
+        self.toplayer = nn.Conv2d(2048, 256, kernel_size=1, stride=1, padding=0)  # Reduce channels
+
+        # Smooth layers
+        self.smooth1 = nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+        self.smooth2 = nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+
+        # Lateral layers
+        self.latlayer1 = nn.Conv2d(1024, 256, kernel_size=1, stride=1, padding=0)
+        self.latlayer2 = nn.Conv2d( 512, 256, kernel_size=1, stride=1, padding=0)
+        ###
+
+        self.features = nn.Sequential()
+        self.features.add_module("init_block", ResInitBlock(
+            in_channels=in_channels,
+            out_channels=init_block_channels))
+        in_channels = init_block_channels
+        for i, channels_per_stage in enumerate(channels):
+            stage = nn.Sequential()
+            for j, out_channels in enumerate(channels_per_stage):
+                stride = 2 if (j == 0) and (i != 0) else 1
+                stage.add_module("unit{}".format(j + 1), CbamResUnit(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    stride=stride,
+                    bottleneck=bottleneck))
+                in_channels = out_channels
+            self.features.add_module("stage{}".format(i + 1), stage)
+            # print(self.features)
+        # self.features.add_module("final_pool", nn.AvgPool2d(
+        #     kernel_size=7,
+        #     stride=1))
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        # DACL attention network
+        self.nb_head = 2048
+        self.attention = nn.Sequential(
+            nn.Linear(2048 * 7 * 7, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(inplace=True),
+            # nn.Linear(3584, 512),
+            # nn.BatchNorm1d(512),
+            # nn.ReLU(inplace=True),
+            nn.Linear(512, 64),
+            nn.BatchNorm1d(64),
+            nn.Tanh(),
+        )
+        self.attention_heads = nn.Linear(64, 2 * self.nb_head)
+
+        self.output = nn.Linear(
+            in_features=in_channels,
+            out_features=num_classes)
+        self.fc = nn.Linear(2048, num_classes)
+        self._init_params()
+
+    def _init_params(self):
+        for name, module in self.named_modules():
+            if isinstance(module, nn.Conv2d):
+                init.kaiming_uniform_(module.weight)
+                if module.bias is not None:
+                    init.constant_(module.bias, 0)
+
+    def _make_layer(self, block, planes, num_blocks, stride):
+        strides = [stride] + [1]*(num_blocks-1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_planes, planes, stride))
+            self.in_planes = planes * block.expansion
+        return nn.Sequential(*layers)
+
+    def _upsample_add(self, x, y):
+        '''Upsample and add two feature maps.
+        Args:
+          x: (Variable) top feature map to be upsampled.
+          y: (Variable) lateral feature map.
+        Returns:
+          (Variable) added feature map.
+        Note in PyTorch, when input size is odd, the upsampled feature map
+        with `F.upsample(..., scale_factor=2, mode='nearest')`
+        maybe not equal to the lateral feature map size.
+        e.g.
+        original input size: [N,_,15,15] ->
+        conv2d feature map size: [N,_,8,8] ->
+        upsampled feature map size: [N,_,16,16]
+        So we choose bilinear upsample which supports arbitrary output sizes.
+        '''
+        _,_,H,W = y.size()
+        return F.upsample(x, size=(H,W), mode='bilinear') + y
+
+    def forward(self, x):
+        # Bottom-up
+        #resinitblock
+        c1 = F.relu(self.bn1(self.conv1(x)))
+        c1 = F.max_pool2d(c1, kernel_size=3, stride=2, padding=1)
+        
+        c2 = self.layer2(c1)
+        c3 = self.layer3(c2)
+        c4 = self.layer4(c3)
+        c5 = self.layer5(c4)
+        p6 = self.conv6(c5)
+        p7 = self.conv7(F.relu(p6))
+        # Top-down
+        p5 = self.toplayer(c5)
+        p4 = self._upsample_add(p5, self.latlayer1(c4))
+        p3 = self._upsample_add(p4, self.latlayer2(c3))
+        # Smooth
+        p4 = self.smooth1(p4)
+        p3 = self.smooth2(p3)
+        return p3, p4, p5, p6, p7
+
+
+
+    def forward(self, x):
+        # print("input.shape==================",x.shape)
+        x = self.features(x)
+        # print("feature.shape==================",x.shape)
+        # x = self.avgpool(x)
+        # print("x.shape==================", x.shape)
+
+        # DACL attention
+        x_flat = torch.flatten(x, 1)
+        # print("x_flat.shape==================", x.shape)
+        E = self.attention(x_flat)
+        # print("E.shape==================", E.shape)
+        A = self.attention_heads(E).reshape(-1, 2048, 2).softmax(dim=-1)[:, :, 1]
+        # print("A.shape==================", A.shape)
+
+
+        x = self.avgpool(x)
+        f = torch.flatten(x, 1)
+        # f = A.view(A.size(0), -1)
+        # print("f.shape==================", f.shape)
+        out = self.fc(f)
+        # out = self.output(f)
+        # print("out.shape==================", out.shape)
+
+        return f, out, A
+        # return out 改成下面
+        # x = x.view(x.size(0), -1)
+        # x = self.output(x)
+        # return out
+
 def get_resnet(blocks,model_name=None,pretrained=False,root=os.path.join("~", ".torch", "models"),**kwargs):
     """
     Create CBAM-ResNet model with specific parameters.
@@ -317,7 +483,8 @@ def get_resnet(blocks,model_name=None,pretrained=False,root=os.path.join("~", ".
 
     channels = [[ci] * li for (ci, li) in zip(channels_per_layers, layers)]
 
-    net = CbamResNet(
+    #net = CbamResNet(
+    net = FPNCbamResNet(        
         channels=channels,
         init_block_channels=init_block_channels,
         bottleneck=bottleneck,

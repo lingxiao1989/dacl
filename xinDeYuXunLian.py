@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.nn.init as init
 from pytorchcv.models.common import conv1x1_block, conv7x7_block
 from pytorchcv.models.resnet import ResInitBlock, ResBlock, ResBottleneck
+import torch.nn.functional as F
 
 class MLP(nn.Module):
     """
@@ -279,7 +280,7 @@ class FPNCbamResNet(nn.Module):
                  in_channels=3,
                  in_size=(224, 224),
                  num_classes=1000):
-        super(CbamResNet, self).__init__()
+        super(FPNCbamResNet, self).__init__()
         self.in_size = in_size
         self.num_classes = num_classes
 
@@ -289,10 +290,10 @@ class FPNCbamResNet(nn.Module):
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         # Bottom-up layers
-        self.layer2 = self._make_layer(block,  64, num_blocks[0], stride=1)
-        self.layer3 = self._make_layer(block, 128, num_blocks[1], stride=2)
-        self.layer4 = self._make_layer(block, 256, num_blocks[2], stride=2)
-        self.layer5 = self._make_layer(block, 512, num_blocks[3], stride=2)
+        self.layer2 = self._make_layer(ResInitBlock,  64, channels[0], stride=1)
+        self.layer3 = self._make_layer(ResInitBlock, 128, channels[1], stride=2)
+        self.layer4 = self._make_layer(ResInitBlock, 256, channels[2], stride=2)
+        self.layer5 = self._make_layer(ResInitBlock, 512, channels[3], stride=2)
         self.conv6 = nn.Conv2d(2048, 256, kernel_size=3, stride=2, padding=1)
         self.conv7 = nn.Conv2d( 256, 256, kernel_size=3, stride=2, padding=1)
 
@@ -357,7 +358,7 @@ class FPNCbamResNet(nn.Module):
                 if module.bias is not None:
                     init.constant_(module.bias, 0)
 
-    def _make_layer(self, block, planes, num_blocks, stride):
+    def =[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]+-----------------0]0]0]0]0]0]0]0]0]0]_make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
         layers = []
         for stride in strides:
@@ -380,11 +381,8 @@ class FPNCbamResNet(nn.Module):
         conv2d feature map size: [N,_,8,8] ->
         upsampled feature map size: [N,_,16,16]
         So we choose bilinear upsample which supports arbitrary output sizes.
-        '''
-        _,_,H,W = y.size()
-        return F.upsample(x, size=(H,W), mode='bilinear') + y
-
-    def forward(self, x):
+        '''```````````````````````` b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b`
+        _,_,H,W = y.sizegbnhvmvmvmvmvmvm
         # Bottom-up
         #resinitblock
         c1 = F.relu(self.bn1(self.conv1(x)))
@@ -404,10 +402,9 @@ class FPNCbamResNet(nn.Module):
         p4 = self.smooth1(p4)
         p3 = self.smooth2(p3)
         return p3, p4, p5, p6, p7
+    '''
 
-
-
-    def forward(self, x):
++-   def forward(self, x):
         # print("input.shape==================",x.shape)
         x = self.features(x)
         # print("feature.shape==================",x.shape)
@@ -550,7 +547,7 @@ def cbam_resnet50(**kwargs):
     root : str, default '~/.torch/models'
         Location for keeping the model parameters.
     """
-    return get_resnet(blocks=50, model_name="cbam_resnet50" ,pretrained=True , **kwargs)
+    return get_resnet(blocks=50, model_name="cbam_resnet50" ,pretrained=False , **kwargs)
 
 # def cbam_resnet101(**kwargs):
 #     """
@@ -590,7 +587,7 @@ def _calc_width(net):
 def _test():
     import torch
 
-    pretrained = False
+    #pretrained = False
 
     models = [
         # cbam_resnet18,
@@ -601,9 +598,10 @@ def _test():
     ]
 
     for model in models:
-
-        net = model(pretrained=pretrained)
-
+        #net = model(pretrained=pretrained)
+        net = model()
+        print(net)
+'''
         # net.train()
         net.eval()
         weight_count = _calc_width(net)
@@ -618,6 +616,7 @@ def _test():
         f,out,a  = net(x)
         out.sum().backward()
         assert (tuple(out.size()) == (1, 1000))
+'''
 
 if __name__ == "__main__":
     _test()

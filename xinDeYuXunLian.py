@@ -460,6 +460,45 @@ class FPNCbamResNet(nn.Module):
         # x = self.avgpool(x)
         # print("x.shape==================", x.shape)
 
+        feature1 = torch.flatten(p3, 1)
+        feature1 = torch.nn.Dropout(0.5)(feature1)
+        feature2 = torch.flatten(p4, 1)
+        feature2 = torch.nn.Dropout(0.5)(feature2)        
+        feature3 = torch.flatten(p5, 1)
+        feature3 = torch.nn.Dropout(0.5)(feature3)        
+        feature4 = torch.flatten(p6, 1)
+        feature4 = torch.nn.Dropout(0.5)(feature4)        
+        feature5 = torch.flatten(p7, 1)
+        feature5 = torch.nn.Dropout(0.5)(feature5)
+
+        ''' keras implementation
+        # Run classification for each of the generated features from the pyramid
+        feature1 = Flatten()(P3)
+        dp1 = Dropout(0.5)(feature1)
+        preds1 = Dense(2, activation='relu',kernel_initializer=RandomNormal(mean=0.0, stddev=0.001))(dp1)
+        #################################################################
+        feature2 = Flatten()(P4)
+        dp2 = Dropout(0.5)(feature2)
+        preds2 = Dense(2, activation='relu',kernel_initializer=RandomNormal(mean=0.0, stddev=0.001))(dp2)
+        #################################################################
+        feature3 = Flatten()(P5)
+        dp3= Dropout(0.5)(feature3)
+        preds3 = Dense(2, activation='relu',kernel_initializer=RandomNormal(mean=0.0, stddev=0.001))(dp3)
+        #################################################################
+        feature4 = Flatten()(P6)
+        dp4 = Dropout(0.5)(feature4)
+        preds4 = Dense(2, activation='relu',kernel_initializer=RandomNormal(mean=0.0, stddev=0.001))(dp4)
+        #################################################################
+        feature5 = Flatten()(P7)
+        dp5 = Dropout(0.5)(feature5)
+        preds5 = Dense(2, activation='relu',kernel_initializer=RandomNormal(mean=0.0, stddev=0.001))(dp5)
+        #################################################################
+        concat=keras.layers.Concatenate(axis=1)([preds1,preds2,preds3,preds4,preds5]) #Concatenate the predictions(Classification results) of each of the pyramid features 
+        out=keras.layers.Dense(2,activation='softmax',kernel_initializer=RandomNormal(mean=0.0, stddev=0.001))(concat) #Final Classification
+
+        model = Model(inputs=base_model.input, outputs=out) #Create the Training Model
+        '''
+        '''
         # DACL attention
         x_flat = torch.flatten(x, 1)
         # print("x_flat.shape==================", x.shape)
@@ -467,7 +506,7 @@ class FPNCbamResNet(nn.Module):
         # print("E.shape==================", E.shape)
         A = self.attention_heads(E).reshape(-1, 2048, 2).softmax(dim=-1)[:, :, 1]
         # print("A.shape==================", A.shape)
-
+        '''
 
         x = self.avgpool(x)
         f = torch.flatten(x, 1)

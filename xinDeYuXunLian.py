@@ -290,10 +290,10 @@ class FPNCbamResNet(nn.Module):
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         # Bottom-up layers
-        self.layer2 = self._make_layer(ResInitBlock,  64, channels[0], stride=1)
-        self.layer3 = self._make_layer(ResInitBlock, 128, channels[1], stride=2)
-        self.layer4 = self._make_layer(ResInitBlock, 256, channels[2], stride=2)
-        self.layer5 = self._make_layer(ResInitBlock, 512, channels[3], stride=2)
+        #self.layer2 = self._make_layer(ResInitBlock,  64, channels[0][0], stride=1) (stage1)
+        #self.layer3 = self._make_layer(ResInitBlock, 128, channels[1][0], stride=2) (stage2)
+        #self.layer4 = self._make_layer(ResInitBlock, 256, channels[2][0], stride=2) (stage3)
+        #self.layer5 = self._make_layer(ResInitBlock, 512, channels[3][0], stride=2) (stage4)
         self.conv6 = nn.Conv2d(2048, 256, kernel_size=3, stride=2, padding=1)
         self.conv7 = nn.Conv2d( 256, 256, kernel_size=3, stride=2, padding=1)
 
@@ -314,17 +314,45 @@ class FPNCbamResNet(nn.Module):
             in_channels=in_channels,
             out_channels=init_block_channels))
         in_channels = init_block_channels
-        for i, channels_per_stage in enumerate(channels):
-            stage = nn.Sequential()
-            for j, out_channels in enumerate(channels_per_stage):
-                stride = 2 if (j == 0) and (i != 0) else 1
-                stage.add_module("unit{}".format(j + 1), CbamResUnit(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    stride=stride,
-                    bottleneck=bottleneck))
-                in_channels = out_channels
-            self.features.add_module("stage{}".format(i + 1), stage)
+
+        self.stage1 = nn.Sequential()
+        for j, out_channels in enumerate(channels[0]):
+            stride = 2 if (j == 0) and (0 != 0) else 1
+            self.stage1.add_module("unit{}".format(j + 1), CbamResUnit(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                stride=stride,
+                bottleneck=bottleneck))
+            in_channels = out_channels
+        self.stage2 = nn.Sequential()
+        for j, out_channels in enumerate(channels[1]):
+            stride = 2 if (j == 0) and (1 != 0) else 1
+            self.stage2.add_module("unit{}".format(j + 1), CbamResUnit(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                stride=stride,
+                bottleneck=bottleneck))
+            in_channels = out_channels
+        self.stage3 = nn.Sequential()
+        for j, out_channels in enumerate(channels[2]):
+            stride = 2 if (j == 0) and (2 != 0) else 1
+            self.stage3.add_module("unit{}".format(j + 1), CbamResUnit(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                stride=stride,
+                bottleneck=bottleneck))
+            in_channels = out_channels
+        self.stage4 = nn.Sequential()
+        for j, out_channels in enumerate(channels[3]):
+            stride = 2 if (j == 0) and (3 != 0) else 1
+            self.stage4.add_module("unit{}".format(j + 1), CbamResUnit(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                stride=stride,
+                bottleneck=bottleneck))
+            in_channels = out_channels
+
+
             # print(self.features)
         # self.features.add_module("final_pool", nn.AvgPool2d(
         #     kernel_size=7,
@@ -358,7 +386,7 @@ class FPNCbamResNet(nn.Module):
                 if module.bias is not None:
                     init.constant_(module.bias, 0)
 
-    def =[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]0]+-----------------0]0]0]0]0]0]0]0]0]0]_make_layer(self, block, planes, num_blocks, stride):
+    def _make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
         layers = []
         for stride in strides:
@@ -381,8 +409,12 @@ class FPNCbamResNet(nn.Module):
         conv2d feature map size: [N,_,8,8] ->
         upsampled feature map size: [N,_,16,16]
         So we choose bilinear upsample which supports arbitrary output sizes.
-        '''```````````````````````` b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b`
-        _,_,H,W = y.sizegbnhvmvmvmvmvmvm
+        '''
+        _,_,H,W = y.size()
+        return F.upsample(x, size=(H,W), mode='bilinear') + y
+
+    '''
+    def forward(self, x):
         # Bottom-up
         #resinitblock
         c1 = F.relu(self.bn1(self.conv1(x)))
@@ -402,12 +434,29 @@ class FPNCbamResNet(nn.Module):
         p4 = self.smooth1(p4)
         p3 = self.smooth2(p3)
         return p3, p4, p5, p6, p7
+
     '''
 
-+-   def forward(self, x):
+    def forward(self, x):
         # print("input.shape==================",x.shape)
         x = self.features(x)
         # print("feature.shape==================",x.shape)
+
+        c2 = self.stage1(x)
+        c3 = self.stage2(c2)
+        c4 = self.stage3(c3)
+        c5 = self.stage4(c4)        
+
+        p6 = self.conv6(c5)
+        p7 = self.conv7(F.relu(p6))
+        # Top-down
+        p5 = self.toplayer(c5)
+        p4 = self._upsample_add(p5, self.latlayer1(c4))
+        p3 = self._upsample_add(p4, self.latlayer2(c3))
+        # Smooth
+        p4 = self.smooth1(p4)
+        p3 = self.smooth2(p3)
+
         # x = self.avgpool(x)
         # print("x.shape==================", x.shape)
 
@@ -481,6 +530,7 @@ def get_resnet(blocks,model_name=None,pretrained=False,root=os.path.join("~", ".
     channels = [[ci] * li for (ci, li) in zip(channels_per_layers, layers)]
 
     #net = CbamResNet(
+    print(channels)
     net = FPNCbamResNet(        
         channels=channels,
         init_block_channels=init_block_channels,

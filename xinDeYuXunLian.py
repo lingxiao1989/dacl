@@ -352,7 +352,13 @@ class FPNCbamResNet(nn.Module):
                 bottleneck=bottleneck))
             in_channels = out_channels
 
+        self.feat_out1 = nn.Linear(200704, num_classes)
+        self.feat_out2 = nn.Linear(50176, num_classes)
+        self.feat_out3 = nn.Linear(12544, num_classes)
+        self.feat_out4 = nn.Linear(4096, num_classes)
+        self.feat_out5 = nn.Linear(1024, num_classes)
 
+        self.final_out = nn.Linear(num_classes*5, num_classes)
             # print(self.features)
         # self.features.add_module("final_pool", nn.AvgPool2d(
         #     kernel_size=7,
@@ -446,6 +452,10 @@ class FPNCbamResNet(nn.Module):
         c3 = self.stage2(c2)
         c4 = self.stage3(c3)
         c5 = self.stage4(c4)        
+        print("c2.shape==================", c2.shape)
+        print("c3.shape==================", c3.shape)
+        print("c4.shape==================", c4.shape)
+        print("c5.shape==================", c5.shape)
 
         p6 = self.conv6(c5)
         p7 = self.conv7(F.relu(p6))
@@ -456,21 +466,68 @@ class FPNCbamResNet(nn.Module):
         # Smooth
         p4 = self.smooth1(p4)
         p3 = self.smooth2(p3)
+        print("p3.shape==================", p3.shape)
+        print("p4.shape==================", p4.shape)
+        print("p5.shape==================", p5.shape)
+        print("p6.shape==================", p6.shape)
+        print("p7.shape==================", p7.shape)
+
+        ''' keras implementation
+        # "P6 is obtained via a 3x3 stride-2 conv on C5"
+        P6 = keras.layers.Conv2D(feature_size, kernel_size=3, strides=2, padding='same', name='P6')(C5)
+
+        # "P7 is computed by applying ReLU followed by a 3x3 stride-2 conv on P6"
+        P7 = keras.layers.Activation('relu', name='C6_relu')(P6)
+        P7 = keras.layers.Conv2D(feature_size, kernel_size=3, strides=2, padding='same', name='P7')(P7)
+
+        P5 = keras.layers.Conv2D(feature_size, kernel_size=1, strides=1, padding='same', name='C5_reduced')(C5)
+        P5_upsampled = layers.UpsampleLike(name='P5_upsampled')([P5, C4])
+        P5 = keras.layers.Conv2D(feature_size, kernel_size=3, strides=1, padding='same', name='P5')(P5)
+
+        # Concatenate P5 elementwise to C4
+        P4 = keras.layers.Conv2D(feature_size, kernel_size=1, strides=1, padding='same', name='C4_reduced')(C4)
+        P4 = keras.layers.Concatenate(axis=3)([P5_upsampled, P4])
+        P4_upsampled = layers.UpsampleLike(name='P4_upsampled')([P4, C3])
+        P4 = keras.layers.Conv2D(feature_size, kernel_size=3, strides=1, name='P4')(P4)
+
+        # Concatenate P4 elementwise to C3
+        P3 = keras.layers.Conv2D(feature_size, kernel_size=1, strides=1, padding='same', name='C3_reduced')(C3)
+        P3 = keras.layers.Concatenate(axis=3)([P4_upsampled, P3])
+        P3 = keras.layers.Conv2D(feature_size, kernel_size=3, strides=1, name='P3')(P3)
+        '''
 
         # x = self.avgpool(x)
         # print("x.shape==================", x.shape)
 
         feature1 = torch.flatten(p3, 1)
         feature1 = torch.nn.Dropout(0.5)(feature1)
+        feature1 = self.feat_out1(feature1)
+
+        print("feature1.shape==================", feature1.shape)
+
         feature2 = torch.flatten(p4, 1)
-        feature2 = torch.nn.Dropout(0.5)(feature2)        
+        feature2 = torch.nn.Dropout(0.5)(feature2)
+        feature2 = self.feat_out2(feature2)
+
+        print("feature2.shape==================", feature2.shape)
+
         feature3 = torch.flatten(p5, 1)
-        feature3 = torch.nn.Dropout(0.5)(feature3)        
+        feature3 = torch.nn.Dropout(0.5)(feature3)
+        feature3 = self.feat_out3(feature3)
+
         feature4 = torch.flatten(p6, 1)
-        feature4 = torch.nn.Dropout(0.5)(feature4)        
+        feature4 = torch.nn.Dropout(0.5)(feature4)
+        feature4 = self.feat_out4(feature4)
+
         feature5 = torch.flatten(p7, 1)
         feature5 = torch.nn.Dropout(0.5)(feature5)
+        feature5 = self.feat_out5(feature5)
 
+        concat = torch.cat((feature1,feature2,feature3,feature4,feature5),1)
+
+        print("concat.shape==================", concat.shape)
+
+        out=self.final_out(concat)
         ''' keras implementation
         # Run classification for each of the generated features from the pyramid
         feature1 = Flatten()(P3)
@@ -508,16 +565,16 @@ class FPNCbamResNet(nn.Module):
         # print("A.shape==================", A.shape)
         '''
 
-        x = self.avgpool(x)
-        f = torch.flatten(x, 1)
+        #x = self.avgpool(x)
+        #f = torch.flatten(x, 1)
         # f = A.view(A.size(0), -1)
         # print("f.shape==================", f.shape)
-        out = self.fc(f)
+        #out = self.fc(f)
         # out = self.output(f)
         # print("out.shape==================", out.shape)
 
-        return f, out, A
-        # return out 改成下面
+        #return f, out, A
+        return out 
         # x = x.view(x.size(0), -1)
         # x = self.output(x)
         # return out
@@ -690,7 +747,7 @@ def _test():
         #net = model(pretrained=pretrained)
         net = model()
         print(net)
-'''
+
         # net.train()
         net.eval()
         weight_count = _calc_width(net)
@@ -702,10 +759,10 @@ def _test():
         # assert (model != cbam_resnet152 or weight_count == 66826848)
 
         x = torch.randn(1, 3, 224, 224)
-        f,out,a  = net(x)
-        out.sum().backward()
-        assert (tuple(out.size()) == (1, 1000))
-'''
+        y = net(x)
+        y.sum().backward()
+        assert (tuple(y.size()) == (1, 1000))
+
 
 if __name__ == "__main__":
     _test()

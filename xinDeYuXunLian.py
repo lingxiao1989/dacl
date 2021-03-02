@@ -363,6 +363,7 @@ class FPNCbamResNet(nn.Module):
         # self.features.add_module("final_pool", nn.AvgPool2d(
         #     kernel_size=7,
         #     stride=1))
+        self.final_pool =  nn.AvgPool2d(kernel_size=7,stride=1)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         # DACL attention network
         self.nb_head = 2048
@@ -472,7 +473,7 @@ class FPNCbamResNet(nn.Module):
         print("p6.shape==================", p6.shape)
         print("p7.shape==================", p7.shape)
 
-        ''' keras implementation
+        '''keras implementation
         # "P6 is obtained via a 3x3 stride-2 conv on C5"
         P6 = keras.layers.Conv2D(feature_size, kernel_size=3, strides=2, padding='same', name='P6')(C5)
 
@@ -495,7 +496,6 @@ class FPNCbamResNet(nn.Module):
         P3 = keras.layers.Concatenate(axis=3)([P4_upsampled, P3])
         P3 = keras.layers.Conv2D(feature_size, kernel_size=3, strides=1, name='P3')(P3)
         '''
-
         # x = self.avgpool(x)
         # print("x.shape==================", x.shape)
 
@@ -504,7 +504,7 @@ class FPNCbamResNet(nn.Module):
         feature1 = self.feat_out1(feature1)
 
         print("feature1.shape==================", feature1.shape)
-
+        '''
         feature2 = torch.flatten(p4, 1)
         feature2 = torch.nn.Dropout(0.5)(feature2)
         feature2 = self.feat_out2(feature2)
@@ -528,7 +528,7 @@ class FPNCbamResNet(nn.Module):
         print("concat.shape==================", concat.shape)
 
         out=self.final_out(concat)
-        ''' keras implementation
+        keras implementation
         # Run classification for each of the generated features from the pyramid
         feature1 = Flatten()(P3)
         dp1 = Dropout(0.5)(feature1)
@@ -574,10 +574,10 @@ class FPNCbamResNet(nn.Module):
         # print("out.shape==================", out.shape)
 
         #return f, out, A
-        return out 
-        # x = x.view(x.size(0), -1)
-        # x = self.output(x)
-        # return out
+        #x = self.final_pool(c5)
+        #x = x.view(x.size(0), -1)
+        #out = self.output(x)
+        return feature1
 
 def get_resnet(blocks,model_name=None,pretrained=False,root=os.path.join("~", ".torch", "models"),**kwargs):
     """
@@ -722,6 +722,123 @@ def cbam_resnet50(**kwargs):
 #     """
 #     return get_resnet(blocks=152, model_name="cbam_resnet152", **kwargs)
 
+def conv3x3(in_channels, out_channels, stride=1, groups=1, dilation=1):
+    return nn.Conv2d(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        kernel_size=3,
+        stride=stride,
+        padding=dilation,
+        groups=groups,
+        bias=False,
+        dilation=dilation,
+    )
+
+
+def conv1x1(in_channels, out_channels, stride=1):
+    """1x1 convolution"""
+    return nn.Conv2d(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        kernel_size=1,
+        stride=stride,
+        bias=False,
+    )
+
+
+class ResidualUnit(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(ResidualUnit, self).__init__()
+        width = int(out_channels / 4)
+
+        self.conv1 = conv1x1(in_channels, width)
+        self.bn1 = nn.BatchNorm2d(width)
+
+        self.conv2 = conv3x3(width, width)
+        self.bn2 = nn.BatchNorm2d(width)
+
+        self.conv3 = conv1x1(width, out_channels)
+        self.bn3 = nn.BatchNorm2d(out_channels)
+
+        self.relu = nn.ReLU(inplace=True)
+
+        # for downsample
+        self._downsample = nn.Sequential(
+            conv1x1(in_channels, out_channels, 1), nn.BatchNorm2d(out_channels)
+        )
+
+    def forward(self, x):
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu(out)
+
+        out = self.conv3(out)
+        out = self.bn3(out)
+
+        out += self._downsample(identity)
+        out = self.relu(out)
+
+        return out
+
+
+class BasicBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        pass
+
+    def forward(self, x):
+        pass
+
+
+class BaseNet(nn.Module):
+    """basenet for fer2013"""
+
+    def __init__(self, in_channels=1, num_classes=7):
+        super(BaseNet, self).__init__()
+        norm_layer = nn.BatchNorm2d
+
+        self.conv1 = nn.Conv2d(
+            in_channels=1,
+            out_channels=64,
+            kernel_size=7,
+            stride=1,
+            padding=3,
+            bias=False,
+        )
+        self.bn1 = nn.BatchNorm2d(num_features=64)
+        self.relu = nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
+        self.residual_1 = ResidualUnit(in_channels=64, out_channels=256)
+        self.residual_2 = ResidualUnit(in_channels=256, out_channels=512)
+        self.residual_3 = ResidualUnit(in_channels=512, out_channels=1024)
+
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(1024, 7)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+
+        x = self.residual_1(x)
+        x = self.residual_2(x)
+        x = self.residual_3(x)
+
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.fc(x)
+        return x
+
+
+def basenet(in_channels=3, num_classes=1000):
+    return BaseNet(in_channels, num_classes)
+
 def _calc_width(net):
     import numpy as np
     net_params = filter(lambda p: p.requires_grad, net.parameters())
@@ -738,9 +855,10 @@ def _test():
     models = [
         # cbam_resnet18,
         # cbam_resnet34,
-        cbam_resnet50,
+        #cbam_resnet50,
         # cbam_resnet101,
         # cbam_resnet152,
+        basenet
     ]
 
     for model in models:
@@ -760,8 +878,8 @@ def _test():
 
         x = torch.randn(1, 3, 224, 224)
         y = net(x)
-        y.sum().backward()
-        assert (tuple(y.size()) == (1, 1000))
+        #y.sum().backward()
+        #assert (tuple(y.size()) == (1, 1000))
 
 
 if __name__ == "__main__":

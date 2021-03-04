@@ -14,6 +14,7 @@ import torch.nn.init as init
 from pytorchcv.models.common import conv1x1_block, conv7x7_block
 from pytorchcv.models.resnet import ResInitBlock, ResBlock, ResBottleneck
 import torch.nn.functional as F
+from resnet import BasicBlock, Bottleneck, ResNet, resnet18
 
 class MLP(nn.Module):
     """
@@ -788,11 +789,53 @@ class ResidualUnit(nn.Module):
 
 
 class BasicBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        pass
+    expansion = 1
+    __constants__ = ["downsample"]
+
+    def __init__(
+        self,
+        inplanes,
+        planes,
+        stride=1,
+        downsample=None,
+        groups=1,
+        base_width=64,
+        dilation=1,
+        norm_layer=None,
+    ):
+        super(BasicBlock, self).__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm2d
+        if groups != 1 or base_width != 64:
+            raise ValueError("BasicBlock only supports groups=1 and base_width=64")
+        if dilation > 1:
+            raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
+        # Both self.conv1 and self.downsample layers downsample the input when stride != 1
+        self.conv1 = conv3x3(inplanes, planes, stride)
+        self.bn1 = norm_layer(planes)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = conv3x3(planes, planes)
+        self.bn2 = norm_layer(planes)
+        self.downsample = downsample
+        self.stride = stride
 
     def forward(self, x):
-        pass
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out += identity
+        out = self.relu(out)
+
+        return out
 
 
 class BaseNet(nn.Module):
@@ -836,8 +879,67 @@ class BaseNet(nn.Module):
         return x
 
 
-def basenet(in_channels=3, num_classes=1000):
+def basenet(in_channels=1, num_classes=7):
     return BaseNet(in_channels, num_classes)
+
+
+from masking import masking
+
+
+class ResMasking(ResNet):
+    def __init__(self, weight_path):
+        super(ResMasking, self).__init__(
+            block=BasicBlock, layers=[3, 4, 6, 3], in_channels=3, num_classes=1000
+        )
+        # state_dict = torch.load('saved/checkpoints/resnet18_rot30_2019Nov05_17.44')['net']
+        # state_dict = load_state_dict_from_url(model_urls['resnet34'], progress=True)
+        # self.load_state_dict(state_dict)
+
+        self.fc = nn.Linear(512, 7)
+
+        """
+        # freeze all net
+        for m in self.parameters():
+            m.requires_grad = False
+        """
+
+        self.mask1 = masking(64, 64, depth=4)
+        self.mask2 = masking(128, 128, depth=3)
+        self.mask3 = masking(256, 256, depth=2)
+        self.mask4 = masking(512, 512, depth=1)
+
+    def forward(self, x):  # 224
+        x = self.conv1(x)  # 112
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)  # 56
+
+        x = self.layer1(x)  # 56
+        m = self.mask1(x)
+        x = x * (1 + m)
+        # x = x * m
+
+        x = self.layer2(x)  # 28
+        m = self.mask2(x)
+        x = x * (1 + m)
+        # x = x * m
+
+        x = self.layer3(x)  # 14
+        m = self.mask3(x)
+        x = x * (1 + m)
+        # x = x * m
+
+        x = self.layer4(x)  # 7
+        m = self.mask4(x)
+        x = x * (1 + m)
+        # x = x * m
+
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+
+        x = self.fc(x)
+        return x
+
 
 def _calc_width(net):
     import numpy as np
@@ -876,7 +978,7 @@ def _test():
         # assert (model != cbam_resnet101 or weight_count == 49330172)
         # assert (model != cbam_resnet152 or weight_count == 66826848)
 
-        x = torch.randn(1, 3, 224, 224)
+        x = torch.randn(1, 1, 224, 224)
         y = net(x)
         #y.sum().backward()
         #assert (tuple(y.size()) == (1, 1000))

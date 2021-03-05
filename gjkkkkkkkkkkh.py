@@ -287,12 +287,12 @@ class FER2013Trainer(Trainer):
             targets = targets.cuda(non_blocking=True)
 
             # compute output, measure accuracy and record loss
-            #features, outputs, A = self._model(images)
-            outputs = self._model(images)            
+            features, outputs, A = self._model(images)
+            #outputs = self._model(images)            
             loss = self._criterion(outputs, targets)
-            #loss_cent = self._criterion_cent(features, A, targets)
+            loss_cent = self._criterion_cent(features, A, targets)
             # loss_cent *= self._configs["cweight"]
-            #loss = loss + 0.01 * loss_cent
+            loss = loss + 0.01 * loss_cent
 
             acc = accuracy(outputs, targets)[0]
 
@@ -494,7 +494,7 @@ class FER2013Trainer(Trainer):
 
         # self._scheduler.step(self._train_loss_list[-1])
         self._scheduler.step(100 - self._val_acc_list[-1])
-        # self._center_scheduler.step()
+        self._center_scheduler.step()
 
     def _logging(self):
         consume_time = str(datetime.datetime.now() - self._start_time)

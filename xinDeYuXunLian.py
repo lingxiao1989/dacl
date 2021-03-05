@@ -907,6 +907,20 @@ class ResMasking(ResNet):
         self.mask2 = masking(128, 128, depth=3)
         self.mask3 = masking(256, 256, depth=2)
         self.mask4 = masking(512, 512, depth=1)
+        
+        self.nb_head = 512
+        self.attention = nn.Sequential(
+            #nn.Linear(2048 * 7 * 7, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(inplace=True),
+            # nn.Linear(3584, 512),
+            # nn.BatchNorm1d(512),
+            # nn.ReLU(inplace=True),
+            nn.Linear(512, 64),
+            nn.BatchNorm1d(64),
+            nn.Tanh(),
+        )
+        self.attention_heads = nn.Linear(64, 2 * self.nb_head)
 
     def forward(self, x):  # 224
         x = self.conv1(x)  # 112
@@ -934,11 +948,29 @@ class ResMasking(ResNet):
         x = x * (1 + m)
         # x = x * m
 
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
+        # DACL attention
+        x_flat = torch.flatten(x, 1)
+        # print("x_flat.shape==================", x.shape)
+        E = self.attention(x_flat)
+        # print("E.shape==================", E.shape)
+        A = self.attention_heads(E).reshape(-1, 512, 2).softmax(dim=-1)[:, :, 1]
+        # print("A.shape==================", A.shape)
 
-        x = self.fc(x)
-        return x
+
+        x = self.avgpool(x)
+        f = torch.flatten(x, 1)
+        # f = A.view(A.size(0), -1)
+        # print("f.shape==================", f.shape)
+        out = self.fc(f)
+        # out = self.output(f)
+        # print("out.shape==================", out.shape)
+
+        return f, out, A
+
+        #x = self.avgpool(x)
+        #x = torch.flatten(x, 1)
+        #x = self.fc(x)
+        #return x
 
 
 def _calc_width(net):

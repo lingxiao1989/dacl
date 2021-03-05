@@ -1,0 +1,22 @@
+{
+	"data_path": "/home/zhimahu/jjy/DataSet/fer_2013/fer2013_csv",
+	"image_size": 224,
+	"in_channels": 3,
+	"num_classes": 7,
+	"arch": "ResMasking",
+	"lr":  0.01,
+	"weighted_loss": 0,
+	"momentum": 0.9,
+	"weight_decay": 0.01,
+	"distributed": 0,
+	"batch_size": 64,
+	"num_workers": 8,
+	"device": "cuda:0",
+	"max_epoch_num":149,
+	"max_plateau_count": 8,
+	"plateau_patience": 10,
+	"steplr": 50,
+	"log_dir": "saved/logs",
+	"checkpoint_dir": "saved/checkpoints",
+	"model_name": "_n"
+}
